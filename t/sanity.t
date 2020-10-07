@@ -18,14 +18,55 @@ __DATA__
     location /t {
         content_by_lua_block {
 			local ctx = require('resty.ctxvar')
-			--ctx.main()
+			ctx.main()
             ctx.test()
         }
     }
+--- more_headers
+host: www.mock.com
+content-type: text/json
+connection: closed
+accept-encoding: gzip, deflate
+accept-language: en-US
+user-agent: nginx_test
+referer: http://referer.com/uri
+cookie: ccs=11
 --- request
 GET /t/q?a=1&b=2&c=3
 --- no_error_log
 [error]
 --- error_code: 200
+--- response_body_like
+url=http://www\.mock\.com:\d+/t/q\?a=1&b=2&c=3
+
+=== TEST 2: Post test
+--- http_config eval: $::HttpConfig
+--- config
+    location /t {
+        content_by_lua_block {
+			local ctx = require('resty.ctxvar')
+            ctx.test()
+        }
+        log_by_lua_block {
+            require('resty.ctxvar').test()
+        }
+    }
+--- more_headers
+host: www.mock.com
+content-type: text/json
+connection: closed
+accept-encoding: gzip, deflate
+accept-language: en-US
+user-agent: nginx_test
+--- request
+POST /t/t.jpg
+TEST_Request_body_text
+--- no_error_log
+[error]
+--- error_code: 200
+--- response_body_like
+body=TEST_Request_body_text
+content_length=22
+
 
 
