@@ -18,7 +18,7 @@ __DATA__
     location /t {
         content_by_lua_block {
 			local ctx = require('resty.ctxvar')
-			ctx.main()
+			--ctx.main()
             ctx.test()
         }
     }
@@ -32,12 +32,12 @@ user-agent: nginx_test
 referer: http://referer.com/uri
 cookie: ccs=11
 --- request
-GET /t/q?a=1&b=2&c=3
+GET //t////q?a=1&b=2&c=3&d=&e
 --- no_error_log
 [error]
 --- error_code: 200
 --- response_body_like
-url=http://www\.mock\.com:\d+/t/q\?a=1&b=2&c=3
+url=http://www\.mock\.com:\d+/t/q\?a=1&b=2&c=3&d=&e
 
 === TEST 2: Post test
 --- http_config eval: $::HttpConfig
@@ -59,7 +59,7 @@ accept-encoding: gzip, deflate
 accept-language: en-US
 user-agent: nginx_test
 --- request
-POST /t/t.jpg
+POST /t/t.jpg?c=&d=1
 TEST_Request_body_text
 --- no_error_log
 [error]

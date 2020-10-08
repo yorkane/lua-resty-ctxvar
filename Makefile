@@ -1,6 +1,7 @@
 INST_PREFIX ?= /usr
-INST_LIBDIR ?= $(INST_PREFIX)/lib/lua/5.1
-INST_LUADIR ?= $(INST_PREFIX)/share/lua/5.1
+# INST_LIBDIR ?= $(INST_PREFIX)/lib/lua/5.1
+# INST_LUADIR ?= $(INST_PREFIX)/share/lua/5.1
+INST_LUADIR ?= $(INST_PREFIX)/local/openresty/site/lualib
 INSTALL ?= install
 
 .PHONY: default
@@ -17,6 +18,11 @@ test:
 install:
 	$(INSTALL) -d $(INST_LUADIR)/resty/
 	$(INSTALL) lib/resty/*.lua $(INST_LUADIR)/resty/
+
+### uninstall:      uninstall the library to runtime
+.PHONY: uninstall
+uninstall:
+	rm -d $(INST_LUADIR)/resty/ctxvar.lua
 
 ### lint:         Lint Lua source code
 .PHONY: lint

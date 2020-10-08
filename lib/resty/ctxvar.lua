@@ -1,9 +1,16 @@
 --[[
 License MIT
 ]]
-local ngx, nvar, concat, ngxreq, nphase, ngsub = ngx, ngx.var, table.concat, ngx.req, ngx.get_phase, ngx.re.gsub
+local ngx, nvar, concat, ngxreq, nphase, ngsub, encode_args =
+    ngx,
+    ngx.var,
+    table.concat,
+    ngx.req,
+    ngx.get_phase,
+    ngx.re.gsub,
+    ngx.encode_args
 local find, sub, byte, sreverse, lower = string.find, string.sub, string.byte, string.reverse, string.lower
-local setmetatable, type, rawset, tablepool = setmetatable, type, rawset, require("tablepool")
+local next, setmetatable, type, rawset, tablepool = next, setmetatable, type, rawset, require("tablepool")
 local empty_tb, TAG = {}, "CTXVAR"
 local ngx_var = {
     -- arg_name = "", -- argument name in the request line
@@ -42,7 +49,8 @@ local ngx_var = {
     request_body_file = "", -- name of a temporary file with the request body. At the end of processing, the file needs to be removed. To always write the request body to a file, client_body_in_file_only needs to be enabled. When the name of a temporary file is passed in a proxied request or in a request to a FastCGI/uwsgi/SCGI server, passing the request body should be disabled by the proxy_pass_request_body off, fastcgi_pass_request_body off, uwsgi_pass_request_body off, or scgi_pass_request_body off directives, respectively.
     request_completion = "", -- “OK” if a request has completed, or an empty string otherwise
     request_filename = "", -- file path for the current request, based on the root or alias directives, and the request URI
-    request_id = false ,--"7ced51898a63d0d25ad92b953bd20af5", -- unique request identifier generated from 16 random bytes, in hexadecimal (1.11.0)
+    request_id = false,
+    --"7ced51898a63d0d25ad92b953bd20af5", -- unique request identifier generated from 16 random bytes, in hexadecimal (1.11.0)
     request_length = false, -- request length (including request line, header, and request body) (1.3.12, 1.2.7)
     request_method = "", -- request method, usually “GET” or “POST”
     request_time = false, --"123", -- request processing time in seconds with a milliseconds resolution (1.3.9, 1.2.6); time elapsed since the first bytes were read from the client
@@ -114,10 +122,10 @@ local static = {
 ---@field is_timer boolean @ indicate current request is initiated from timer phase (usually by system call)
 ---@field is_static string @ indicate current request is asking for static content
 local _M = {
-    is_timer = true, -- just leave a key to indicate current request is from timer,
+    is_timer = false, -- just leave a key to indicate current request is from timer,
     is_static = false,
-	response_body = "",
-	method = 'GET',
+    response_body = "",
+    method = "GET",
     request_header = {
         content_type = "text/json",
         connection = "keep-alive",
@@ -126,8 +134,8 @@ local _M = {
         user_agent = "lua-resty-http",
         referer = "",
         cookie = "",
-		origin = "",
-		host = "",
+        origin = "",
+        host = "",
         upgrade_insecure_requests = "1"
     },
     is_json = false,
@@ -138,10 +146,11 @@ local _M = {
     var = ngx_var,
     ip = "127.0.0.1", -- could be remote_addr
     uri_args = {},
-    url = "https://sss.xxx.xx/sss/q?xx=1", -- the original full url
-    file_format = "html",
-    uri = "/path",
-    query_string = ""
+    url = "", -- the original full url as https://sss.xxx.xx/sss/q?xx=1
+    file_format = "", --html
+    uri = "", --/path
+    query_string = "",
+    request_uri = "" -- normalized url
 }
 
 function _M.dispose(ctx)
@@ -201,10 +210,10 @@ end
 
 local reg_dashes = [[\-]]
 local header_mt = {
-	__index = function(self, key)
-		if _M.request_header[reg_dashes] == nil then
-			key =  lower(ngsub(key, reg_dashes, '_', 'jo'))
-		end
+    __index = function(self, key)
+        if _M.request_header[reg_dashes] == nil then
+            key = lower(ngsub(key, reg_dashes, "_", "jo"))
+        end
         local data = nvar["http_" .. key] or false
         rawset(self, key, data)
         return data
@@ -215,24 +224,14 @@ local ctvmt = {
     __index = function(self, key)
         local data
         local var = self.var
-        if key == "is_timer" then
-            data = var.is_timer
-        elseif key == "ip" then
-            if var.is_timer then
-                data = "127.0.0.1"
-            else
-                local header = self.request_header
-                data = header["remoteip"] or header["X-real-ip"] or header["x-forwarded-for"] or var.remote_addr
-            end
+        if key == "ip" then
+            local header = self.request_header
+            data = header["remoteip"] or header["X-real-ip"] or header["x-forwarded-for"] or var.remote_addr
         elseif key == "request_body" then
-            if var.is_timer then
-                data = ""
-            else
-                ngx.req.read_body()
-				data = ngx.req.get_body_data()
-            end
+            ngx.req.read_body()
+            data = ngx.req.get_body_data() or ""
         elseif key == "file_format" then
-            data = _M.get_file_suffix(var.request_uri)
+            data = _M.get_file_suffix(self.uri)
         elseif key == "uri_args" then
             data = ngx.req.get_uri_args()
         elseif key == "post_args" then
@@ -246,7 +245,7 @@ local ctvmt = {
                 data = false
             end
         elseif key == "url" then
-            data = var.request_uri
+            data = self.request_uri
             local host, port, scheme, port_str = var.host, var.server_port, var.scheme
             if port == "443" and scheme == "https" then
                 port_str = ""
@@ -256,14 +255,35 @@ local ctvmt = {
                 port_str = ":" .. port
             end
             data = scheme .. "://" .. host .. port_str .. data
+        elseif key == "host" then
+            data = var.host
         elseif key == "uri" then
             data = var.uri
         elseif key == "query_string" then
-			data = var.query_string
-		elseif key == 'method' then
-			data = ngxreq.get_method()
-		elseif key == 'is_static' then
-			data = static[self.file_format] == 1
+            data = var.query_string
+        elseif key == "method" then
+            data = ngxreq.get_method()
+        elseif key == "is_static" then
+            data = static[self.file_format] == 1
+        elseif key == "request_uri" then
+            if self.is_query_changed then
+                local args = self.uri_args
+                if next(args) then
+                    local query_string = encode_args(args)
+                    self.query_string = query_string
+                    return self.uri .. "?" .. query_string
+                else
+                    self.query_string = ""
+                    return self.uri
+                end
+            end
+            if #self.query_string > 3 then
+                return self.uri .. "?" .. self.query_string
+            else
+                return self.uri
+            end
+        elseif key == 'resp_header' then
+               data = tablepool.fetch(TAG, 0, 7)
         else
             data = false
         end
@@ -272,30 +292,22 @@ local ctvmt = {
     end
 }
 
-local mt = {
+local nvar_mt = {
     __metatable = "No access to ngx-system-context metatable", --prevent from metable modifying
-    __newindex = function(self, key)
-        return nil, "No modification to ngx-system-context variable"
+    __newindex = function(self, key, val)
+        if not ngx_var[key] then
+            error("ngx.var." .. key .. " could not be modified!")
+        end
+        ngx.var[key] = val
+        rawset(self, key, val)
     end,
     __index = function(self, key)
         local data = rawget(self, key)
         if data ~= nil then
             return data
         end
-        if key == "is_timer" then
-            data = ngx.get_phase()
-            if data == "timer" then
-                rawset(self, "is_timer", true)
-                return true
-            else
-                rawset(self, "is_timer", false)
-                return false
-            end
-        end
-        if self.is_timer then
-			return ngx_var[key]
-		elseif not ngx_var[key] then
-			return nvar[key]
+        if not ngx_var[key] then
+            return nvar[key]
         elseif key == "host" then
             data = nvar.host
         elseif key == "request_uri" then
@@ -304,31 +316,30 @@ local mt = {
             data = nvar.server_port
         elseif key == "method" or key == "request_method" then
             data = ngx.req.get_method()
-        elseif key == "phase" then
-            return ngx.get_phase()
         elseif key == "remote_addr" then
             data = nvar.remote_addr
         elseif key == "scheme" then
             data = nvar.scheme
-        elseif key == "query_string" or key == 'args' then
+        elseif key == "query_string" or key == "args" then
             data = self.request_uri
             local inx = find(data, "?", 2, true)
             if inx then
-                rawset(self, "uri", sub(data, 1, inx - 1))
+                rawset(self, "uri", _M.normalize_url(sub(data, 1, inx - 1)))
                 data = sub(data, inx + 1, -1)
-			else
-				rawset(self, "uri", data)
-				data = ''
-			end
+            else
+                rawset(self, "uri", data)
+                data = ""
+            end
         elseif key == "uri" then
             data = self.request_uri
             local inx = find(data, "?", 2, true)
             if inx then
                 rawset(self, "query_string", sub(data, inx + 1, -1))
                 data = sub(data, 1, inx - 1)
-			else
+            else
                 rawset(self, "query_string", "")
-			end
+            end
+            data = _M.normalize_url(data)
         else
             data = nvar[key] or ""
         end
@@ -343,19 +354,17 @@ local timer_ngx = {
 }
 setmetatable(timer_ngx, {__index = ngx})
 
+local timer_ctx_mt = {__index = _M}
+local timer_var_mt = {__index = ngx_var}
+local timer_request_header_mt = {__index = _M.request_header}
+
 ---new boost performance for ngx.ctx._env, and avoid phase call failures, and always return string
 ---@return resty.ctxvar
-function _M.new(tb)
-    if not tb then
-        tb = ngx.ctx._env
-        if not tb then
-            tb = tablepool.fetch(TAG, 0, 19)
-            tb.request_header = tablepool.fetch(TAG, 0, 11)
-            tb.resp_header = tablepool.fetch(TAG, 0, 11)
-            setmetatable(tb.request_header, header_mt)
-            ngx.ctx._env = tb
-        end
+function _M.new(tb, is_timer)
+    if is_timer == nil then
+        is_timer = ngx.get_phase() == "timer"
     end
+    tb = tb or ngx.ctx._var or tablepool.fetch(TAG, 0, 19)
     if type(tb) ~= "table" then
         return nil, "table type required"
     end
@@ -363,9 +372,26 @@ function _M.new(tb)
         tb.___is_ctx_var = true
         if not tb.var then
             tb.var = tablepool.fetch(TAG, 0, 17)
-            setmetatable(tb.var, mt)
         end
-        tb = setmetatable(tb, ctvmt)
+        if not tb.request_header then
+            tb.request_header = tablepool.fetch(TAG, 0, 11)
+        end
+        if not tb.resp_header then
+        -- tb.resp_header = tablepool.fetch(TAG, 0, 11)
+        end
+        if is_timer then
+            tb.var = tablepool.fetch(TAG, 0, 11)
+            tb.is_timer = true
+            setmetatable(tb, timer_ctx_mt)
+            setmetatable(tb.var, timer_var_mt)
+            setmetatable(tb.request_header, timer_request_header_mt)
+        else
+            tb.is_timer = false
+            setmetatable(tb, ctvmt)
+            setmetatable(tb.var, nvar_mt)
+            setmetatable(tb.request_header, header_mt)
+            ngx.ctx._var = tb
+        end
     end
     return tb
 end
@@ -381,60 +407,78 @@ function _M.get_ngx(env)
     return ngx
 end
 
+local reg_slash = [[\/+]]
+function _M.normalize_url(url)
+    if not url then
+        return
+    end
+    if byte(url, 1, 1) == 47 then
+        return ngsub(url, reg_slash, "/", "jo")
+    end
+    local p1 = sub(url, 9, -1)
+    p1 = ngsub(p1, reg_slash, "/", "jo")
+    return sub(url, 1, 9) .. p1
+end
+
 setmetatable(
     _M,
     {
-        __call = function(self, tab)
-            return _M.new(tab) -- make it callable as ctxvar(ctx)
+        __call = function(self, tab, is_timer)
+            return _M.new(tab, is_timer) -- make it callable as ctxvar(ctx)
         end
     }
 )
 
-local dump = require("resty.klib.dump").global()
 function _M.test()
-	local ctv = _M.new()
+    local ctv = _M.new()
     for key, val in pairs(ngx_var) do
         if key ~= "request_id" then
             local v1, v2 = ngx.var[key], ctv.var[key]
-			if v1 ~= v2 and (v2 ~= "" and v2 ~= empty_tb) then
+            if v1 ~= v2 and (v2 ~= "" and v2 ~= empty_tb) then
                 error(key .. " with ngx.var: " .. (v1 or "") .. " not match in ctxvar: " .. (v2 or ""))
             end
         end
-	end
-	for key, val in pairs(_M) do
-		if type(val) ~= 'function' then
-			local _ = ctv[key]
-		end
     end
-	assert(ctv.query_string == ctv.var.query_string)
-	logs(ctv.uri, ctv.var.uri)
-	assert(ctv.uri == ctv.var.uri)
-	local phase = ngx.get_phase()
-	if phase == 'content' then
-		ctv.response_body = phase
-		ngx.say("url=", ctv.url)
-		ngx.say("body=", ctv.request_body)
-		ngx.say("content_length=", ctv.request_header.content_length)
-	elseif phase == 'log' then
-		assert(ctv.response_body == 'content')
-	end
-	logs(ctv)
+    for key, val in pairs(_M) do
+        if type(val) ~= "function" then
+            local _ = ctv[key]
+        end
+    end
+    assert(ctv.query_string == ctv.var.query_string)
+    assert(ctv.uri == ctv.var.uri)
+    local phase = ngx.get_phase()
+    if phase == "content" then
+        ctv.response_body = phase
+        ngx.say("url=", ctv.url)
+        ngx.say("body=", ctv.request_body)
+        ngx.say("content_length=", ctv.request_header.content_length)
+    elseif phase == "log" then
+        assert(ctv.response_body == "content", ctv.response_body)
+    end
+
+    local uri = "/12//34///i/56/78//d//////////////////////f/90?q=1"
 end
 
+local dump = require("resty.klib.dump").global()
 function _M.main()
     local c = _M.new()
     local t = c.ip
-    c.request_header["sss"] = "ss1"
-    c.resp_header.xx = 1
+    -- c.request_header["sss"] = "ss1"
+    -- c.resp_header.xx = 1
     -- ngx.say(t)
     -- c.ip = 222
-	c.response_body = "sss"
-	local b = c.request_body
-	logs(c.request_header.content_type, c.request_header.host, c.request_body)
+    c.response_body = "sss"
+    local b = c.request_body
+    logs(c.request_header.content_type, c.request_header.host, c.request_body)
     -- logs(c.request_header, c.request_header.accept_encoding)
     for key, val in pairs(_M) do
         local _ = c[key]
     end
+    local uri = "/12//34///i/56/78//d//////////////////////f/90?q=1"
+    local r = ngx.re.gsub(uri, [[\/+]], "/", "jo")
+    -- ngx.say(_M.normalize_url(uri) == r)
+    -- ngx.say(uri,'--' ,
+
     -- logs(c)
 
     -- _M.dispose(c)
