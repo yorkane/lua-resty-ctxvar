@@ -452,6 +452,8 @@ function _M.test()
         ngx.say("url=", ctv.url)
         ngx.say("body=", ctv.request_body)
         ngx.say("content_length=", ctv.request_header.content_length)
+        ngx.say('header.accept-encoding=', ctv.request_header['accept-encoding'])
+        ngx.say('header.user-agent=', ctv.request_header['user-agent'])
     elseif phase == "log" then
         assert(ctv.response_body == "content", ctv.response_body)
     end

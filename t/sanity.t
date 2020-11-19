@@ -67,6 +67,7 @@ TEST_Request_body_text
 --- response_body_like
 body=TEST_Request_body_text
 content_length=22
-
+header.accept-encoding=gzip, deflate
+header.user-agent=nginx_test
 
 
