@@ -461,29 +461,6 @@ function _M.test()
     local uri = "/12//34///i/56/78//d//////////////////////f/90?q=1"
 end
 
-local dump = require("resty.klib.dump").global()
 function _M.main()
-    local c = _M.new()
-    local t = c.ip
-    -- c.request_header["sss"] = "ss1"
-    -- c.resp_header.xx = 1
-    -- ngx.say(t)
-    -- c.ip = 222
-    c.response_body = "sss"
-    local b = c.request_body
-    logs(c.request_header.content_type, c.request_header.host, c.request_body)
-    -- logs(c.request_header, c.request_header.accept_encoding)
-    for key, val in pairs(_M) do
-        local _ = c[key]
-    end
-    local uri = "/12//34///i/56/78//d//////////////////////f/90?q=1"
-    local r = ngx.re.gsub(uri, [[\/+]], "/", "jo")
-    -- ngx.say(_M.normalize_url(uri) == r)
-    -- ngx.say(uri,'--' ,
-
-    -- logs(c)
-
-    -- _M.dispose(c)
-    -- logs(getmetatable(c))
 end
 return _M
