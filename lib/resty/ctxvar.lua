@@ -211,7 +211,7 @@ end
 local reg_dashes = [[\-]]
 local header_mt = {
     __index = function(self, key)
-        if _M.request_header[reg_dashes] == nil then
+        if _M.request_header[key] == nil then
             key = lower(ngsub(key, reg_dashes, "_", "jo"))
         end
         local data = nvar["http_" .. key] or false
