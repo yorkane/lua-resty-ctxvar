@@ -1,14 +1,13 @@
 --[[
 License MIT
 ]]
-local ngx, nvar, concat, ngxreq, nphase, ngsub, encode_args =
-    ngx,
-    ngx.var,
-    table.concat,
-    ngx.req,
-    ngx.get_phase,
-    ngx.re.gsub,
-    ngx.encode_args
+local ngx, nvar, concat, ngxreq, nphase, ngsub, encode_args = ngx,
+ngx.var,
+table.concat,
+ngx.req,
+ngx.get_phase,
+ngx.re.gsub,
+ngx.encode_args
 local find, sub, byte, sreverse, lower = string.find, string.sub, string.byte, string.reverse, string.lower
 local next, setmetatable, type, rawset, tablepool = next, setmetatable, type, rawset, require("tablepool")
 local empty_tb, TAG = {}, "CTXVAR"
@@ -113,7 +112,7 @@ local static = {
     woff = 1
 }
 ---@class resty.ctxvar
----@field request_header table<string,string> @ keep reqeust header
+---@field request_header table<string,string> @ keep request header
 ---@field resp_header table<string,string> @ keep response header
 ---@field ip string @ as xxx.xxx.xxx.xxx
 ---@field request_body string @ any phase could inject the body for next phases
@@ -143,6 +142,7 @@ local _M = {
     is_query_changed = false,
     is_uri_changed = false,
     resp_header = {},
+    cookie = {},
     var = ngx_var,
     ip = "127.0.0.1", -- could be remote_addr
     uri_args = {},
@@ -220,73 +220,10 @@ local header_mt = {
     end
 }
 
-local ctvmt = {
+local cookie_mt = {
     __index = function(self, key)
         local data
-        local var = self.var
-        if key == "ip" then
-            local header = self.request_header
-            data = header["remoteip"] or header["X-real-ip"] or header["x-forwarded-for"] or var.remote_addr
-        elseif key == "request_body" then
-            ngx.req.read_body()
-            data = ngx.req.get_body_data() or ""
-        elseif key == "file_format" then
-            data = _M.get_file_suffix(self.uri)
-        elseif key == "uri_args" then
-            data = ngx.req.get_uri_args()
-        elseif key == "post_args" then
-            ngx.req.read_body()
-            data = ngx.req.get_post_args()
-        elseif key == "is_json" then
-            data = var.content_type
-            if data and find(data, "json", 1, true) then
-                data = true
-            else
-                data = false
-            end
-        elseif key == "url" then
-            data = self.request_uri
-            local host, port, scheme, port_str = var.host, var.server_port, var.scheme
-            if port == "443" and scheme == "https" then
-                port_str = ""
-            elseif port == "80" and scheme == "http" then
-                port_str = ""
-            else
-                port_str = ":" .. port
-            end
-            data = scheme .. "://" .. host .. port_str .. data
-        elseif key == "host" then
-            data = var.host
-        elseif key == "uri" then
-            data = var.uri
-        elseif key == "query_string" then
-            data = var.query_string
-        elseif key == "method" then
-            data = ngxreq.get_method()
-        elseif key == "is_static" then
-            data = static[self.file_format] == 1
-        elseif key == "request_uri" then
-            if self.is_query_changed then
-                local args = self.uri_args
-                if next(args) then
-                    local query_string = encode_args(args)
-                    self.query_string = query_string
-                    return self.uri .. "?" .. query_string
-                else
-                    self.query_string = ""
-                    return self.uri
-                end
-            end
-            if #self.query_string > 3 then
-                return self.uri .. "?" .. self.query_string
-            else
-                return self.uri
-            end
-        elseif key == 'resp_header' then
-               data = tablepool.fetch(TAG, 0, 7)
-        else
-            data = false
-        end
+        data = ngx.var['cookie_' .. key] or ''
         rawset(self, key, data)
         return data
     end
@@ -302,16 +239,25 @@ local nvar_mt = {
         rawset(self, key, val)
     end,
     __index = function(self, key)
-        local data = rawget(self, key)
-        if data ~= nil then
-            return data
-        end
+        local data
+        --local data = rawget(self, key)
+        --if data ~= nil then
+        --    return data
+        --end
         if not ngx_var[key] then
             return nvar[key]
         elseif key == "host" then
             data = nvar.host
         elseif key == "request_uri" then
             data = nvar.request_uri
+            local b1, b2, b3 = byte(data, 2, 4) -- try to remove url-head 3-2 flashes
+            if b1 == 47 and b1 == b2 and b2 == b3 then
+                data = sub(data, 4, -1)
+            elseif b1 == 47 and b1 == b2 then
+                data = sub(data, 3, -1)
+            elseif b1 == 47 then
+                data = sub(data, 2, -1)
+            end
         elseif key == "port" or key == "server_port" then
             data = nvar.server_port
         elseif key == "method" or key == "request_method" then
@@ -348,36 +294,122 @@ local nvar_mt = {
     end
 }
 
+local ctvmt = {
+    __index = function(self, key)
+        local data
+        --ngx.log(ngx.WARN,key ,'------------------------')
+        if key == "ip" then
+            local header = self.request_header
+            data = header["remoteip"] or header["X-real-ip"] or header["x-forwarded-for"] or var.remote_addr
+        elseif key == 'var' then
+            data = tablepool.fetch(TAG, 0, 11)
+            setmetatable(data, nvar_mt)
+        elseif key == "request_body" then
+            ngx.req.read_body()
+            data = ngx.req.get_body_data() or ""
+        elseif key == "file_format" then
+            data = _M.get_file_suffix(self.uri)
+        elseif key == "uri_args" then
+            data = ngx.req.get_uri_args()
+        elseif key == "post_args" then
+            ngx.req.read_body()
+            data = ngx.req.get_post_args()
+        elseif key == "is_json" then
+            data = self.var.content_type
+            if data and find(data, "json", 1, true) then
+                data = true
+            else
+                data = false
+            end
+        elseif key == "url" then
+            local var = self.var
+            data = self.request_uri
+            local host, port, scheme, port_str = var.host, var.server_port, var.scheme
+            if port == "443" and scheme == "https" then
+                port_str = ""
+            elseif port == "80" and scheme == "http" then
+                port_str = ""
+            else
+                port_str = ":" .. port
+            end
+            data = scheme .. "://" .. host .. port_str .. data
+        elseif key == 'request_header' then
+            data = tablepool.fetch(TAG, 0, 7)
+            setmetatable(data, header_mt)
+        elseif key == 'var' then
+            data = tablepool.fetch(TAG, 0, 11)
+            setmetatable(data, nvar_mt)
+        elseif key == "cookie" then
+            data = tablepool.fetch(TAG, 0, 7)
+            setmetatable(data, cookie_mt)
+        elseif key == "host" then
+            data = self.var.host
+        elseif key == "uri" then
+            data = self.var.uri
+        elseif key == "query_string" then
+            data = self.var.query_string
+        elseif key == "method" then
+            data = ngxreq.get_method()
+        elseif key == "is_static" then
+            data = static[self.file_format] == 1
+        elseif key == "request_uri" then
+            if self.is_query_changed then
+                local args = self.uri_args
+                if next(args) then
+                    local query_string = encode_args(args)
+                    self.query_string = query_string
+                    return self.uri .. "?" .. query_string
+                else
+                    self.query_string = ""
+                    return self.uri
+                end
+            end
+            if #self.query_string > 3 then
+                return self.uri .. "?" .. self.query_string
+            else
+                return self.uri
+            end
+        elseif key == 'resp_header' then
+            data = tablepool.fetch(TAG, 0, 7)
+        else
+            data = false
+        end
+        rawset(self, key, data)
+        return data
+    end
+}
+
 local timer_ngx = {
     status = 200,
     header = {}
 }
-setmetatable(timer_ngx, {__index = ngx})
+setmetatable(timer_ngx, { __index = ngx })
 
-local timer_ctx_mt = {__index = _M}
-local timer_var_mt = {__index = ngx_var}
-local timer_request_header_mt = {__index = _M.request_header}
+local timer_ctx_mt = { __index = _M }
+local timer_var_mt = { __index = ngx_var }
+local timer_request_header_mt = { __index = _M.request_header }
 
 ---new boost performance for ngx.ctx._env, and avoid phase call failures, and always return string
 ---@return resty.ctxvar
 function _M.new(tb, is_timer)
-    if is_timer == nil then
-        is_timer = ngx.get_phase() == "timer"
-    end
-    tb = tb or ngx.ctx._var or tablepool.fetch(TAG, 0, 19)
-    if type(tb) ~= "table" then
+    if tb and type(tb) ~= "table" then
         return nil, "table type required"
+    else
+        tb = ngx.ctx._ctxvar or tablepool.fetch(TAG, 0, 17)
     end
     if not tb.___is_ctx_var then
         tb.___is_ctx_var = true
-        if not tb.var then
-            tb.var = tablepool.fetch(TAG, 0, 17)
-        end
-        if not tb.request_header then
-            tb.request_header = tablepool.fetch(TAG, 0, 11)
-        end
-        if not tb.resp_header then
+        --if not tb.var then
+        --    tb.var = tablepool.fetch(TAG, 0, 17)
+        --end
+        --if not tb.request_header then
+        --    tb.request_header = tablepool.fetch(TAG, 0, 11)
+        --end
+        --if not tb.resp_header then
         -- tb.resp_header = tablepool.fetch(TAG, 0, 11)
+        --end
+        if is_timer == nil then
+            is_timer = ngx.get_phase() == "timer"
         end
         if is_timer then
             tb.var = tablepool.fetch(TAG, 0, 11)
@@ -388,9 +420,9 @@ function _M.new(tb, is_timer)
         else
             tb.is_timer = false
             setmetatable(tb, ctvmt)
-            setmetatable(tb.var, nvar_mt)
-            setmetatable(tb.request_header, header_mt)
-            ngx.ctx._var = tb
+            --setmetatable(tb.var, nvar_mt)
+            --setmetatable(tb.request_header, header_mt)
+            ngx.ctx._ctxvar = tb
         end
     end
     return tb
@@ -420,14 +452,11 @@ function _M.normalize_url(url)
     return sub(url, 1, 9) .. p1
 end
 
-setmetatable(
-    _M,
-    {
-        __call = function(self, tab, is_timer)
-            return _M.new(tab, is_timer) -- make it callable as ctxvar(ctx)
-        end
-    }
-)
+setmetatable(_M, {
+    __call = function(self, tab, is_timer)
+        return _M.new(tab, is_timer) -- make it callable as ctxvar(ctx)
+    end
+})
 
 function _M.test()
     local ctv = _M.new()
@@ -462,5 +491,28 @@ function _M.test()
 end
 
 function _M.main()
+    local c = _M.new()
+    local t = c.ip
+    -- c.request_header["sss"] = "ss1"
+    -- c.resp_header.xx = 1
+    -- ngx.say(t)
+    -- c.ip = 222
+    local dump = require("klib.dump").global()
+    c.response_body = "sss"
+    local b = c.request_body
+    logs(c.request_header.content_type, c.request_header.host, c.request_body)
+    -- logs(c.request_header, c.request_header.accept_encoding)
+    for key, val in pairs(_M) do
+        local _ = c[key]
+    end
+    local uri = "/12//34///i/56/78//d//////////////////////f/90?q=1"
+    local r = ngx.re.gsub(uri, [[\/+]], "/", "jo")
+    -- ngx.say(_M.normalize_url(uri) == r)
+    -- ngx.say(uri,'--' ,
+
+    -- logs(c)
+
+    -- _M.dispose(c)
+    -- logs(getmetatable(c))
 end
 return _M
