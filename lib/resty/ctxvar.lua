@@ -1,14 +1,8 @@
 --[[
 License MIT
 ]]
-local ngx, nvar, concat, ngxreq, nphase, ngsub, encode_args = ngx,
-ngx.var,
-table.concat,
-ngx.req,
-ngx.get_phase,
-ngx.re.gsub,
-ngx.encode_args
-local find, sub, byte, sreverse, lower = string.find, string.sub, string.byte, string.reverse, string.lower
+local ngx, nvar, concat, ngxreq, nphase, ngsub, encode_args = ngx, ngx.var, table.concat, ngx.req, ngx.get_phase, ngx.re.gsub, ngx.encode_args
+local find, sub, gsub, byte, sreverse, lower, tostring = string.find, string.sub, string.gsub, string.byte, string.reverse, string.lower, tostring
 local next, setmetatable, type, rawset, tablepool = next, setmetatable, type, rawset, require("tablepool")
 local empty_tb, TAG = {}, "CTXVAR"
 local ngx_var = {
@@ -120,6 +114,9 @@ local static = {
 ---@field is_json boolean @ indicate current request is asking for JSON response
 ---@field is_timer boolean @ indicate current request is initiated from timer phase (usually by system call)
 ---@field is_static string @ indicate current request is asking for static content
+---@field host_1 string @ level 1 host as test.com
+---@field host_2 string @ level 2 host as www.test.com
+---@field host_3 string @ level 3 host as js.www.test.com
 local _M = {
     is_timer = false, -- just leave a key to indicate current request is from timer,
     is_static = false,
@@ -150,7 +147,10 @@ local _M = {
     file_format = "", --html
     uri = "", --/path
     query_string = "",
-    request_uri = "" -- normalized url
+    request_uri = "", -- normalized url
+    host_1 = '',
+    host_2 = '',
+    host_3 = '',
 }
 
 function _M.dispose(ctx)
@@ -371,6 +371,12 @@ local ctvmt = {
             end
         elseif key == 'resp_header' then
             data = tablepool.fetch(TAG, 0, 7)
+        elseif key == 'host_1' then
+            data = _M.get_domain(self.host, 1)
+        elseif key == 'host_2' then
+            data = _M.get_domain(self.host, 2)
+        elseif key == 'host_3' then
+            data = _M.get_domain(self.host, 3)
         else
             data = false
         end
@@ -458,7 +464,52 @@ setmetatable(_M, {
     end
 })
 
+local n_dot = byte('.')
+function _M.get_domain(str, level)
+    if type(str) ~= 'string' or #str < 3 then
+        return nil, 'bad domain'
+    end
+    local len, dot_count, last_dot_position = #str, 0, 0
+    for i = len, 1, -1 do
+        local nchar = byte(str, i, i)
+        if nchar == n_dot then
+            dot_count = dot_count + 1
+            last_dot_position = i
+            if level == dot_count - 1 then
+                return sub(str, i + 1, len), dot_count
+            end
+        end
+    end
+    return str, dot_count
+end
+
+local regex_env1 = '$([a-z][a-z_0-9]+)'
+---
+---@param template_str string @with $XXX variable
+---@param ctx table<string, any>|resty.ctxvar
+---@return string
+function _M.format_var(template_str, ctx)
+    if not template_str then
+        return template_str
+    end
+    local from = find(template_str, "$")
+    if not from then
+        return template_str
+    end
+    --avoid creating temporary function
+    ctx = ctx or _M.new()
+    return gsub(template_str, regex_env1, function(m)
+        return tostring(ctx[m] or '')
+    end)
+end
+
 function _M.test()
+    local test_domain = 'l5.l4.l3.l2.test.com'
+    assert(_M.get_domain(test_domain, 1), 'test.com')
+    assert(_M.get_domain(test_domain, 2), 'l2.test.com')
+    assert(_M.get_domain(test_domain, 3), 'l3.l2.test.com')
+    assert(_M.get_domain(test_domain, 4), 'l4.l3.l2.test.com')
+    assert(_M.get_domain(test_domain, 5), 'l5.l4.l3.l2.test.com')
     local ctv = _M.new()
     for key, val in pairs(ngx_var) do
         if key ~= "request_id" then
@@ -493,26 +544,8 @@ end
 function _M.main()
     local c = _M.new()
     local t = c.ip
-    -- c.request_header["sss"] = "ss1"
-    -- c.resp_header.xx = 1
-    -- ngx.say(t)
-    -- c.ip = 222
     local dump = require("klib.dump").global()
-    c.response_body = "sss"
-    local b = c.request_body
-    logs(c.request_header.content_type, c.request_header.host, c.request_body)
-    -- logs(c.request_header, c.request_header.accept_encoding)
-    for key, val in pairs(_M) do
-        local _ = c[key]
-    end
-    local uri = "/12//34///i/56/78//d//////////////////////f/90?q=1"
-    local r = ngx.re.gsub(uri, [[\/+]], "/", "jo")
-    -- ngx.say(_M.normalize_url(uri) == r)
-    -- ngx.say(uri,'--' ,
 
-    -- logs(c)
 
-    -- _M.dispose(c)
-    -- logs(getmetatable(c))
 end
 return _M
