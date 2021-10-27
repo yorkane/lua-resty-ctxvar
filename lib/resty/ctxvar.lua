@@ -143,6 +143,7 @@ local _M = {
     var = ngx_var,
     ip = "127.0.0.1", -- could be remote_addr
     uri_args = {},
+    post_args = {},
     url = "", -- the original full url as https://sss.xxx.xx/sss/q?xx=1
     file_format = "", --html
     uri = "", --/path
