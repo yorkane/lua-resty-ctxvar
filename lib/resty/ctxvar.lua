@@ -301,7 +301,7 @@ local ctvmt = {
         --ngx.log(ngx.WARN,key ,'------------------------')
         if key == "ip" then
             local header = self.request_header
-            data = header["remoteip"] or header["X-real-ip"] or header["x-forwarded-for"] or var.remote_addr
+            data = header["remoteip"] or header["X-real-ip"] or header["x-forwarded-for"] or nvar.remote_addr
         elseif key == 'var' then
             data = tablepool.fetch(TAG, 0, 11)
             setmetatable(data, nvar_mt)
