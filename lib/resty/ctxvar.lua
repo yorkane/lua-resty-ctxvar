@@ -399,10 +399,14 @@ local timer_request_header_mt = { __index = _M.request_header }
 ---new boost performance for ngx.ctx._env, and avoid phase call failures, and always return string
 ---@return resty.ctxvar
 function _M.new(tb, is_timer)
-    if tb and type(tb) ~= "table" then
+    if not tb then
+        tb = ngx.ctx._env
+        if not tb then
+            tb = tablepool.fetch(TAG, 0, 17)
+            ngx.ctx._env = tb
+        end
+    elseif tb and type(tb) ~= "table" then
         return nil, "table type required"
-    else
-        tb = ngx.ctx._ctxvar or tablepool.fetch(TAG, 0, 17)
     end
     if not tb.___is_ctx_var then
         tb.___is_ctx_var = true
