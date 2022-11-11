@@ -348,7 +348,15 @@ local ctvmt = {
         elseif key == "uri" then
             data = self.var.uri
         elseif key == "query_string" then
-            data = self.var.query_string
+            if self.is_query_changed then
+                local args = self.uri_args
+                if next(args) then
+                    data = encode_args(args)
+                    self.is_query_changed = false
+                end
+            else
+                data = self.var.query_string
+            end
         elseif key == "method" then
             data = ngxreq.get_method()
         elseif key == "is_static" then
